@@ -7,7 +7,7 @@ app.use(bodyParser.json());
 // Constants for ARN generation
 const INSTANCE_ID = 'f604177c-b2ab-4c76-9033-635d195b2772';
 const ACCOUNT_ID = '123456789012';
-const REGION = 'us-east-1';
+const REGION = 'eu-west-2';
 
 // Mock Queues Configuration
 const MOCK_QUEUES = {
