@@ -33,7 +33,32 @@ const MOCK_QUEUES = {
     channel: 'VOICE',
     priority: 2,
     hoursOfOperation: 'ExtendedHours',
-    outboundCallerId: '+1234567891'
+    outboundCallerId: '+678912345'
+  },
+  'monitoring': {
+    queueId: 'queue-support-999',
+    name: 'Monitoring Queue',
+    arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-support-01`,
+    routingProfile: 'tf-support',
+    staffingTarget: { min: 5, max: 15 },
+    queueType: 'AGENT',
+    channel: 'VOICE',
+    priority: 2,
+    hoursOfOperation: 'ExtendedHours',
+    outboundCallerId: '+987654321'
+  },
+
+  'monitoring_chat': {
+    queueId: 'queue-support-999',
+    name: 'Monitoring Queue',
+    arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-support-01`,
+    routingProfile: 'tf-support',
+    staffingTarget: { min: 20, max: 70 },
+    queueType: 'AGENT',
+    channel: 'CHAT',
+    priority: 2,
+    hoursOfOperation: 'ExtendedHours',
+    outboundCallerId: '+987654321'
   },
   // Add more queues here with their specific configurations
 };
