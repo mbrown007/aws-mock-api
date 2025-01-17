@@ -66,48 +66,48 @@ const MOCK_QUEUES = {
     Name: 'Sales Queue',
     Arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-sales-01`,
     QueueType: 'STANDARD',
-    routingProfile: 'rp-sales',
-    staffingTarget: { min: 10, max: 25 },
-    channel: 'VOICE',
-    priority: 1,
-    hoursOfOperation: 'BasicHours',
-    outboundCallerId: '+1234567890'
+    RoutingProfile: 'rp-sales',
+    StaffingTarget: { min: 10, max: 25 },
+    Channel: 'VOICE',
+    Priority: 1,
+    HoursOfOperation: 'BasicHours',
+    OutboundCallerId: '+1234567890'
   },
   'support': {
     Id: 'queue-support-01',
     Name: 'Support Queue',
     Arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-support-01`,
     QueueType: 'STANDARD',
-    routingProfile: 'rp-support',
-    staffingTarget: { min: 15, max: 30 },
-    channel: 'VOICE',
-    priority: 2,
-    hoursOfOperation: 'ExtendedHours',
-    outboundCallerId: '+678912345'
+    RoutingProfile: 'rp-support',
+    StaffingTarget: { min: 15, max: 30 },
+    Channel: 'VOICE',
+    Priority: 2,
+    HoursOfOperation: 'ExtendedHours',
+    OutboundCallerId: '+678912345'
   },
   'monitoring': {
     Id: 'queue-support-999',
     Name: 'Monitoring Queue',
     Arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-monitoring-01`,
     QueueType: 'AGENT',
-    routingProfile: 'tf-support',
-    staffingTarget: { min: 5, max: 15 },
-    channel: 'VOICE',
-    priority: 2,
-    hoursOfOperation: 'ExtendedHours',
-    outboundCallerId: '+987654321'
+    RoutingProfile: 'tf-support',
+    StaffingTarget: { min: 5, max: 15 },
+    Channel: 'VOICE',
+    Priority: 2,
+    HoursOfOperation: 'ExtendedHours',
+    OutboundCallerId: '+987654321'
   },
   'monitoring_chat': {
     Id: 'queue-chat-999',
     Name: 'Monitoring Chat Queue',
     Arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-monitoring-chat-01`,
     QueueType: 'AGENT',
-    routingProfile: 'tf-support',
-    staffingTarget: { min: 20, max: 70 },
-    channel: 'CHAT',
-    priority: 2,
-    hoursOfOperation: 'ExtendedHours',
-    outboundCallerId: '+987654321'
+    RoutingProfile: 'tf-support',
+    StaffingTarget: { min: 20, max: 70 },
+    Channel: 'CHAT',
+    Priority: 2,
+    HoursOfOperation: 'ExtendedHours',
+    OutboundCallerId: '+987654321'
   }
 };
 
@@ -119,7 +119,7 @@ const MetricGenerators = {
       unit: VALID_METRICS.CONTACTS_IN_QUEUE
     }),
     AGENTS_STAFFED: (queue, baseValues) => {
-      const { min, max } = queue.staffingTarget;
+      const { min, max } = queue.StaffingTarget;
       return {
         value: Math.floor(Math.random() * (max - min)) + min,
         unit: VALID_METRICS.AGENTS_STAFFED
@@ -161,27 +161,83 @@ const MetricGenerators = {
 };
 
 function validateMetrics(metrics) {
+  console.log('\nValidating metrics:', JSON.stringify(metrics, null, 2));
+  
   if (!Array.isArray(metrics)) {
+    console.log('Metrics is not an array');
     return false;
   }
-  return metrics.every(metric => 
-    metric && 
-    typeof metric.Name === 'string' && 
-    VALID_METRICS[metric.Name] !== undefined
-  );
+  
+  const validationResults = metrics.every(metric => {
+    console.log('Checking metric:', JSON.stringify(metric));
+    const isValid = metric && 
+      typeof metric.Name === 'string' && 
+      VALID_METRICS[metric.Name] !== undefined;
+    console.log('Metric validation result:', isValid);
+    return isValid;
+  });
+  
+  console.log('Valid metrics:', validationResults);
+  return validationResults;
 }
 
 function validateFilters(filters) {
   if (!Array.isArray(filters)) {
+    console.log('Filters is not an array');
     return false;
   }
   return filters.every(filter => {
-    if (!filter.Queues || !Array.isArray(filter.Queues)) {
+    console.log('\nValidating filter:', JSON.stringify(filter, null, 2));
+    
+    // Check if Queues array exists and is not empty
+    if (!filter.Queues || !Array.isArray(filter.Queues) || filter.Queues.length === 0) {
+      console.log('Invalid or empty Queues array');
       return false;
     }
+    
+    // Check if all queue ARNs exist
+    console.log('\nAvailable queue ARNs:', JSON.stringify(Object.values(MOCK_QUEUES).map(q => q.Arn), null, 2));
+    
+    const validQueues = filter.Queues.every(queueArn => {
+      const found = Object.values(MOCK_QUEUES).some(q => {
+        const arnsMatch = q.Arn === queueArn;
+        console.log('\nARN Comparison (Character by character):');
+        console.log('Request ARN :', queueArn);
+        console.log('Queue ARN  :', q.Arn);
+        console.log('Lengths   :', queueArn.length, q.Arn.length);
+        console.log('Match     :', arnsMatch);
+        if (!arnsMatch) {
+          // Find the first difference
+          for (let i = 0; i < Math.max(queueArn.length, q.Arn.length); i++) {
+            if (queueArn[i] !== q.Arn[i]) {
+              console.log(`First difference at position ${i}:`);
+              console.log(`Request: "${queueArn[i]}" (${queueArn.charCodeAt(i)})`);
+              console.log(`Queue  : "${q.Arn[i]}" (${q.Arn.charCodeAt(i)})`);
+              break;
+            }
+          }
+        }
+        return arnsMatch;
+      });
+      
+      if (!found) {
+        console.log('Queue not found for ARN:', queueArn);
+      }
+      return found;
+    });
+    
+    if (!validQueues) {
+      console.log('Queue validation failed');
+      return false;
+    }
+
+    // Check channel if specified
     if (filter.Channel && !VALID_CHANNELS.includes(filter.Channel)) {
+      console.log('Channel validation failed:', filter.Channel);
       return false;
     }
+
+    console.log('Filter validation passed');
     return true;
   });
 }
@@ -242,9 +298,11 @@ class MetricGenerator {
         Dimensions: {
           Queue: {
             Id: this.queue.Id,
-            Arn: this.queue.Arn
+            Arn: this.queue.Arn,
+            Name: this.queue.Name
           },
-          Channel: this.queue.channel
+          Channel: this.queue.Channel,
+          QueueType: this.queue.QueueType
         },
         Collections: [{
           Metric: {
@@ -285,30 +343,54 @@ app.get('/ListQueues', (req, res) => {
 
 // GetCurrentMetricData endpoint with error simulation and pagination
 app.post('/GetCurrentMetricData', (req, res) => {
+  console.log('\n=== GetCurrentMetricData Request ===');
+  console.log('Request body:', JSON.stringify(req.body, null, 2));
+
   const error = shouldError();
   if (error) {
+    console.log('Random error triggered:', error);
     return res.status(500).json(error);
   }
 
   try {
-    const { InstanceId, Filters, CurrentMetrics, NextToken } = req.body;
+    const { InstanceId, Filters, Metrics, NextToken } = req.body;
+    console.log('\nValidation Steps:');
 
     // Validate required parameters
-    if (!InstanceId || !Filters || !CurrentMetrics) {
+    if (!InstanceId || !Filters || !Filters[0].Metrics) {
+      console.log('Step 1: Missing required parameters');
+      console.log('InstanceId:', !!InstanceId);
+      console.log('Filters:', !!Filters);
+      console.log('Metrics:', !!Filters?.[0]?.Metrics);
       return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
     }
 
     // Validate instance ID
     if (InstanceId !== INSTANCE_ID) {
+      console.log('Step 2: Instance ID mismatch');
+      console.log('Received:', InstanceId);
+      console.log('Expected:', INSTANCE_ID);
       return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
     }
 
+    console.log('Step 3: Processing Filters');
+    console.log(JSON.stringify(Filters, null, 2));
+    
     // Validate filters and metrics
-    if (!validateFilters(Filters)) {
-      return res.status(400).json(AWS_ERRORS.VALIDATION_EXCEPTION);
+    const filtersValid = validateFilters(Filters);
+    console.log('Step 4: Filters validation result:', filtersValid);
+    
+    if (!filtersValid) {
+      return res.status(400).json({
+        __type: 'ResourceNotFoundException',
+        message: 'One or more queues specified in the request cannot be found'
+      });
     }
 
-    if (!validateMetrics(CurrentMetrics)) {
+    const metricsValid = validateMetrics(Filters[0].Metrics);
+    console.log('Step 5: Metrics validation result:', metricsValid);
+    
+    if (!metricsValid) {
       return res.status(400).json(AWS_ERRORS.VALIDATION_EXCEPTION);
     }
 
@@ -316,16 +398,34 @@ app.post('/GetCurrentMetricData', (req, res) => {
     
     Filters.forEach(filter => {
       const queueArns = filter.Queues || [];
+      console.log('\nProcessing filter:', JSON.stringify(filter, null, 2));
+      
       queueArns.forEach(queueArn => {
+        console.log('\nLooking for queue:', queueArn);
         const queue = Object.values(MOCK_QUEUES).find(q => q.Arn === queueArn);
-        if (queue && (!filter.Channel || filter.Channel === queue.channel)) {
-          const generator = new MetricGenerator(queue);
-          allMetricResults.push(...generator.generateMetrics(CurrentMetrics.map(m => m.Name)));
+        console.log('Queue found:', queue ? 'Yes' : 'No');
+        
+        if (queue) {
+          console.log('Queue details:', JSON.stringify(queue, null, 2));
+          if (!filter.Channel || filter.Channel === queue.Channel) {
+            console.log('Channel match successful');
+            const generator = new MetricGenerator(queue);
+            const metrics = generator.generateMetrics(filter.Metrics.map(m => m.Name));
+            console.log('Generated metrics:', JSON.stringify(metrics, null, 2));
+            allMetricResults.push(...metrics);
+          } else {
+            console.log('Channel mismatch:', filter.Channel, '!==', queue.Channel);
+          }
         }
       });
     });
 
     const { items, nextToken } = paginateResults(allMetricResults, NextToken);
+    console.log('\nFinal response:', JSON.stringify({
+      MetricResults: items,
+      NextToken: nextToken,
+      DataSnapshotTime: new Date().toISOString()
+    }, null, 2));
 
     res.json({
       MetricResults: items,
@@ -334,6 +434,7 @@ app.post('/GetCurrentMetricData', (req, res) => {
     });
 
   } catch (error) {
+    console.error('Internal error:', error);
     res.status(500).json(AWS_ERRORS.INTERNAL_SERVICE_ERROR);
   }
 });
