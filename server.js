@@ -12,8 +12,7 @@
  * It uses in-memory data and randomized metrics, 
  * allowing you to experiment with how an AWS Connect 
  * client might interact with a real AWS Connect service.
- * Set error rate:
- * curl -X POST http://localhost:3000/admin/errorRate \ -H 'Content-Type: application/json' \ -d '{"rate": 0.1}'
+ *
  * set random error rate 10%:
  * curl -X POST http://localhost:3000/admin/errorRate \ -H 'Content-Type: application/json' \ -d '{"rate": 0.1}'
 
