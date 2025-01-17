@@ -16,14 +16,24 @@ const MOCK_QUEUES = {
     name: 'Sales Queue',
     arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-sales-01`,
     routingProfile: 'rp-sales',
-    staffingTarget: { min: 10, max: 25 }  // Target staffing levels
+    staffingTarget: { min: 10, max: 25 },
+    queueType: 'STANDARD',  // STANDARD or AGENT
+    channel: 'VOICE',
+    priority: 1,
+    hoursOfOperation: 'BasicHours',
+    outboundCallerId: '+1234567890'
   },
   'support': {
     queueId: 'queue-support-01',
     name: 'Support Queue',
     arn: `arn:aws:connect:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}/queue/queue-support-01`,
     routingProfile: 'rp-support',
-    staffingTarget: { min: 15, max: 30 }
+    staffingTarget: { min: 15, max: 30 },
+    queueType: 'STANDARD',
+    channel: 'VOICE',
+    priority: 2,
+    hoursOfOperation: 'ExtendedHours',
+    outboundCallerId: '+1234567891'
   },
   // Add more queues here with their specific configurations
 };
@@ -125,6 +135,15 @@ class MetricGenerator {
         }, {
           Name: "InstanceId",
           Value: INSTANCE_ID
+        }, {
+          Name: "QueueType",
+          Value: this.queue.queueType
+        }, {
+          Name: "Channel",
+          Value: this.queue.channel
+        }, {
+          Name: "Priority",
+          Value: this.queue.priority.toString()
         }],
         Collections: [{
           Metric: {
