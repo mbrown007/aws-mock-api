@@ -26,6 +26,13 @@ const app = express();
 // Parse JSON bodies for POST requests
 app.use(bodyParser.json());
 
+// Add CORS headers for local testing
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', '*');
+    next();
+});
+
 /****************************************************
  * CONSTANTS AND CONFIGURATION
  ****************************************************/
@@ -599,6 +606,116 @@ app.post('/GetCurrentMetricData', (req, res) => {
   }
 });
 
+
+// Main AWS SDK endpoint handler
+app.all('/', (req, res) => {
+    console.log('\n=== Incoming AWS SDK Request ===');
+    console.log('Method:', req.method);
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Query:', JSON.stringify(req.query, null, 2));
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+
+    const action = req.headers['x-amz-target'];
+    console.log('Action:', action);
+
+    // Simulate random errors
+    const error = shouldError();
+    if (error) {
+        console.log('Random error triggered:', error);
+        return res.status(500).json(error);
+    }
+
+    if (req.method === 'GET' && action === 'ListQueues') {
+        // Handle ListQueues logic
+        const instanceId = req.query.InstanceId;
+        if (!instanceId) {
+            return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
+        }
+
+        if (instanceId !== INSTANCE_ID) {
+            return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
+        }
+
+        const queueList = Object.values(MOCK_QUEUES);
+        const { items, nextToken } = paginateResults(queueList, req.query.NextToken);
+
+        console.log('Returning queues:', items);
+        
+        return res.json({
+            QueueSummaryList: items,
+            NextToken: nextToken
+        });
+    } 
+    else if (req.method === 'POST' && action === 'GetCurrentMetricData') {
+        console.log('\n=== GetCurrentMetricData Request (Root Handler) ===');
+        const { InstanceId, Filters, NextToken } = req.body;
+        
+        console.log('Instance ID:', InstanceId);
+        console.log('Filters:', JSON.stringify(Filters, null, 2));
+        
+        if (!InstanceId || !Filters || !Filters[0]?.Metrics) {
+            console.log('Missing required parameters');
+            return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
+        }
+
+        if (InstanceId !== INSTANCE_ID) {
+            console.log('Instance ID mismatch');
+            return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
+        }
+
+        console.log('Validating filters...');
+        const filtersValid = validateFilters(Filters);
+        console.log('Filters validation result:', filtersValid);
+
+        if (!filtersValid) {
+            return res.status(400).json({
+                __type: 'ResourceNotFoundException',
+                message: 'One or more queues specified in the request cannot be found'
+            });
+        }
+
+        console.log('Validating metrics...');
+        const metricsValid = validateMetrics(Filters[0].Metrics);
+        console.log('Metrics validation result:', metricsValid);
+
+        if (!metricsValid) {
+            return res.status(400).json(AWS_ERRORS.VALIDATION_EXCEPTION);
+        }
+
+        const allMetricResults = [];
+        
+        console.log('Processing filters and generating metrics...');
+        Filters.forEach(filter => {
+            const queueArns = filter.Queues || [];
+            queueArns.forEach(queueArn => {
+                const queue = Object.values(MOCK_QUEUES).find(q => q.Arn === queueArn);
+                if (queue && (!filter.Channel || filter.Channel === queue.Channel)) {
+                    const generator = new MetricGenerator(queue);
+                    const metrics = generator.generateMetrics(filter.Metrics.map(m => m.Name));
+                    allMetricResults.push(...metrics);
+                }
+            });
+        });
+
+        const { items, nextToken: newNextToken } = paginateResults(allMetricResults, NextToken);
+        
+        const response = {
+            MetricResults: items,
+            NextToken: newNextToken,
+            DataSnapshotTime: new Date().toISOString()
+        };
+
+        console.log('Sending response:', JSON.stringify(response, null, 2));
+        return res.json(response);
+    }
+    else {
+        console.log('Unknown operation:', action);
+        return res.status(400).json({
+            __type: 'UnknownOperationException',
+            message: `Unknown operation: ${action}`
+        });
+    }
+});
 /**
  * POST /admin/errorRate
  * 
@@ -618,6 +735,14 @@ app.post('/admin/errorRate', (req, res) => {
   }
 });
 
+//OPTIONS handler for CORS preflight requests
+app.options('*', (req, res) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+    res.header('Access-Control-Allow-Headers', '*');
+    res.sendStatus(200);
+});
+
 /****************************************************
  * SERVER START
  ****************************************************/
@@ -626,4 +751,6 @@ app.post('/admin/errorRate', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Mock AWS Connect API running on port ${PORT}`);
+  console.log(`Instance ID: ${INSTANCE_ID}`);
+  console.log(`Error rate: ${errorRate * 100}%`);
 });
