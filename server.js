@@ -365,252 +365,39 @@ function shouldError() {
  * @param {string} nextToken - The current pagination token
  * @return {Object} { items, nextToken }
  */
+// Update the paginateResults function
 function paginateResults(items, nextToken) {
-  // nextToken is the starting index
-  const startIndex = nextToken ? parseInt(nextToken) : 0;
-  const endIndex = startIndex + ITEMS_PER_PAGE;
-  const hasMore = endIndex < items.length;
-  
-  return {
-    items: items.slice(startIndex, endIndex),
-    nextToken: hasMore ? endIndex.toString() : null
-  };
+    // Parse nextToken as number, default to 0
+    const startIndex = nextToken ? parseInt(nextToken) : 0;
+    
+    // Debug pagination
+    console.log(`Pagination request: items.length=${items.length}, nextToken=${nextToken}, startIndex=${startIndex}`);
+    
+    // If startIndex is beyond array length, return empty result
+    if (startIndex >= items.length) {
+        console.log('Pagination: startIndex beyond array length, returning empty result');
+        return {
+            items: [],
+            nextToken: null
+        };
+    }
+    
+    const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, items.length);
+    const hasMore = endIndex < items.length;
+
+    console.log(`Pagination: startIndex=${startIndex}, endIndex=${endIndex}, hasMore=${hasMore}`);
+    
+    return {
+        items: items.slice(startIndex, endIndex),
+        nextToken: hasMore ? endIndex.toString() : null
+    };
 }
 
-/****************************************************
- * METRIC GENERATOR CLASS
- ****************************************************/
-/**
- * Class to handle the generation of metrics for a 
- * single queue. It first calculates base metric 
- * values, then derives further metric values, and 
- * returns them in a format similar to the 
- * GetCurrentMetricData AWS response.
- */
-class MetricGenerator {
-  constructor(queue) {
-    // The queue for which we generate metrics
-    this.queue = queue;
-    // Store base values (CONTACTS_IN_QUEUE, etc.)
-    this.baseValues = {};
-    // Store derived values (AGENTS_AVAILABLE, etc.)
-    this.derivedValues = {};
-  }
-
-  /**
-   * generateMetrics(requestedMetrics)
-   * 
-   * @param {Array<string>} requestedMetrics - Array of metric names to generate
-   * @returns {Array<Object>} - Array of metric result objects
-   */
-  generateMetrics(requestedMetrics) {
-    // 1. Generate base metrics first
-    Object.keys(MetricGenerators.baseMetrics).forEach(metricName => {
-      this.baseValues[metricName] = MetricGenerators.baseMetrics[metricName](this.queue, this.baseValues);
-    });
-
-    // 2. Generate derived metrics using both baseValues & derivedValues so far
-    Object.keys(MetricGenerators.derivedMetrics).forEach(metricName => {
-      this.derivedValues[metricName] = MetricGenerators.derivedMetrics[metricName](this.queue, {
-        ...this.baseValues,
-        ...this.derivedValues
-      });
-    });
-
-    // 3. Return requested metrics in AWS SDK-like format
-    return requestedMetrics.map(metricName => {
-      // Try to find the metric in baseValues or derivedValues; if not found, default to zero
-      const metricValue = this.baseValues[metricName] || this.derivedValues[metricName] || {
-        value: 0,
-        unit: VALID_METRICS[metricName] || 'COUNT'
-      };
-
-      return {
-        Dimensions: {
-          Queue: {
-            Id: this.queue.Id,
-            Arn: this.queue.Arn,
-            Name: this.queue.Name
-          },
-          Channel: this.queue.Channel,
-          QueueType: this.queue.QueueType
-        },
-        Collections: [{
-          Metric: {
-            Name: metricName,
-            Unit: metricValue.unit
-          },
-          Value: metricValue.value
-        }]
-      };
-    });
-  }
-}
-
-/****************************************************
- * ENDPOINTS
- ****************************************************/
-
-/**
- * GET /ListQueues
- * 
- * Returns a paginated list of mock queues in the 
- * style of AWS Connect's ListQueues API.
- * 
- * Query Parameters:
- *    InstanceId (required) - must match INSTANCE_ID
- *    NextToken (optional) - indicates pagination start
- */
-app.get('/ListQueues', (req, res) => {
-  // Simulate random errors
-  const error = shouldError();
-  if (error) {
-    return res.status(500).json(error);
-  }
-
-  // Validate InstanceId
-  const instanceId = req.query.InstanceId;
-  if (!instanceId) {
-    return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
-  }
-
-  if (instanceId !== INSTANCE_ID) {
-    return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
-  }
-
-  // Paginate the mock queue list
-  const queueList = Object.values(MOCK_QUEUES);
-  const { items, nextToken } = paginateResults(queueList, req.query.NextToken);
-
-  // Return queues in an AWS-like JSON structure
-  res.json({
-    QueueSummaryList: items,
-    NextToken: nextToken
-  });
-});
-
-/**
- * POST /GetCurrentMetricData
- * 
- * Mocks the AWS Connect API GetCurrentMetricData endpoint.
- * It validates incoming parameters and filters, 
- * optionally triggers random errors, and returns 
- * paginated metric results for requested queues.
- */
-app.post('/GetCurrentMetricData', (req, res) => {
-  console.log('\n=== GetCurrentMetricData Request ===');
-  console.log('Request body:', JSON.stringify(req.body, null, 2));
-
-  // Possibly trigger a random error
-  const error = shouldError();
-  if (error) {
-    console.log('Random error triggered:', error);
-    return res.status(500).json(error);
-  }
-
-  try {
-    // Destructure required fields from the request body
-    const { InstanceId, Filters, Metrics, NextToken } = req.body;
-    console.log('\nValidation Steps:');
-
-    // 1. Validate required parameters
-    if (!InstanceId || !Filters || !Filters[0]?.Metrics) {
-      console.log('Step 1: Missing required parameters');
-      console.log('InstanceId:', !!InstanceId);
-      console.log('Filters:', !!Filters);
-      console.log('Metrics in Filter[0]:', !!Filters?.[0]?.Metrics);
-      return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
-    }
-
-    // 2. Validate instance ID
-    if (InstanceId !== INSTANCE_ID) {
-      console.log('Step 2: Instance ID mismatch');
-      console.log('Received:', InstanceId);
-      console.log('Expected:', INSTANCE_ID);
-      return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
-    }
-
-    console.log('Step 3: Processing Filters');
-    console.log(JSON.stringify(Filters, null, 2));
-    
-    // 3. Validate filters
-    const filtersValid = validateFilters(Filters);
-    console.log('Step 4: Filters validation result:', filtersValid);
-    
-    if (!filtersValid) {
-      return res.status(400).json({
-        __type: 'ResourceNotFoundException',
-        message: 'One or more queues specified in the request cannot be found'
-      });
-    }
-
-    // 4. Validate metrics
-    const metricsValid = validateMetrics(Filters[0].Metrics);
-    console.log('Step 5: Metrics validation result:', metricsValid);
-    
-    if (!metricsValid) {
-      return res.status(400).json(AWS_ERRORS.VALIDATION_EXCEPTION);
-    }
-
-    /****************************************************
-     * GENERATE THE REQUESTED METRIC DATA
-     ****************************************************/
-    const allMetricResults = [];
-    
-    // Iterate through each filter
-    Filters.forEach(filter => {
-      const queueArns = filter.Queues || [];
-      console.log('\nProcessing filter:', JSON.stringify(filter, null, 2));
-      
-      // For each ARN in the filter, find the matching mock queue and generate metrics
-      queueArns.forEach(queueArn => {
-        console.log('\nLooking for queue:', queueArn);
-        const queue = Object.values(MOCK_QUEUES).find(q => q.Arn === queueArn);
-        console.log('Queue found:', queue ? 'Yes' : 'No');
-        
-        if (queue) {
-          console.log('Queue details:', JSON.stringify(queue, null, 2));
-          // If there's no channel specified or the channel matches the queue's channel, generate metrics
-          if (!filter.Channel || filter.Channel === queue.Channel) {
-            console.log('Channel match successful');
-            const generator = new MetricGenerator(queue);
-            const metrics = generator.generateMetrics(filter.Metrics.map(m => m.Name));
-            console.log('Generated metrics:', JSON.stringify(metrics, null, 2));
-            allMetricResults.push(...metrics);
-          } else {
-            console.log('Channel mismatch:', filter.Channel, '!==', queue.Channel);
-          }
-        }
-      });
-    });
-
-    // 5. Paginate results and return response
-    const { items, nextToken: newNextToken } = paginateResults(allMetricResults, NextToken);
-    console.log('\nFinal response:', JSON.stringify({
-      MetricResults: items,
-      NextToken: newNextToken,
-      DataSnapshotTime: new Date().toISOString()
-    }, null, 2));
-
-    // Construct the final response object in an AWS-like fashion
-    res.json({
-      MetricResults: items,
-      NextToken: newNextToken,
-      DataSnapshotTime: new Date().toISOString()
-    });
-
-  } catch (error) {
-    // Catch any unexpected runtime errors in the logic
-    console.error('Internal error:', error);
-    res.status(500).json(AWS_ERRORS.INTERNAL_SERVICE_ERROR);
-  }
-});
-
-
-// Main AWS SDK endpoint handler
-app.all('/', (req, res) => {
-    console.log('\n=== Incoming AWS SDK Request ===');
+// Update the main route handler for AWS SDK compatibility
+app.all('*', (req, res, next) => {
+    console.log('\n=== Incoming Request ===');
     console.log('Method:', req.method);
+    console.log('Path:', req.path);
     console.log('Headers:', JSON.stringify(req.headers, null, 2));
     console.log('Query:', JSON.stringify(req.query, null, 2));
     console.log('Body:', JSON.stringify(req.body, null, 2));
@@ -618,103 +405,141 @@ app.all('/', (req, res) => {
     const action = req.headers['x-amz-target'];
     console.log('Action:', action);
 
-    // Simulate random errors
-    const error = shouldError();
-    if (error) {
-        console.log('Random error triggered:', error);
-        return res.status(500).json(error);
-    }
-
-    if (req.method === 'GET' && action === 'ListQueues') {
-        // Handle ListQueues logic
-        const instanceId = req.query.InstanceId;
+    // Check if this is an AWS SDK style request
+    if (action === 'ListQueues' || req.path.includes('/queues-summary/')) {
+        // Extract instanceId from either query or path
+        let instanceId;
+        if (req.path.includes('/queues-summary/')) {
+            instanceId = req.path.split('/queues-summary/')[1]?.split('?')[0];
+            console.log('Extracted instanceId from path:', instanceId);
+        } else {
+            instanceId = req.query.InstanceId;
+            console.log('Using instanceId from query:', instanceId);
+        }
+        
+        // Validate instanceId
         if (!instanceId) {
+            console.log('Missing instanceId');
             return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
         }
 
         if (instanceId !== INSTANCE_ID) {
+            console.log('Instance ID mismatch:', instanceId, '!==', INSTANCE_ID);
             return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
         }
 
-        const queueList = Object.values(MOCK_QUEUES);
-        const { items, nextToken } = paginateResults(queueList, req.query.NextToken);
-
-        console.log('Returning queues:', items);
-        
-        return res.json({
-            QueueSummaryList: items,
-            NextToken: nextToken
-        });
-    } 
-    else if (req.method === 'POST' && action === 'GetCurrentMetricData') {
-        console.log('\n=== GetCurrentMetricData Request (Root Handler) ===');
-        const { InstanceId, Filters, NextToken } = req.body;
-        
-        console.log('Instance ID:', InstanceId);
-        console.log('Filters:', JSON.stringify(Filters, null, 2));
-        
-        if (!InstanceId || !Filters || !Filters[0]?.Metrics) {
-            console.log('Missing required parameters');
+        // Validate nextToken if provided
+        const nextToken = req.query.nextToken;
+        if (nextToken && isNaN(parseInt(nextToken))) {
+            console.log('Invalid nextToken:', nextToken);
             return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
         }
 
-        if (InstanceId !== INSTANCE_ID) {
-            console.log('Instance ID mismatch');
-            return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
+        // Simulate random errors
+        const error = shouldError();
+        if (error) {
+            console.log('Random error triggered:', error);
+            return res.status(500).json(error);
         }
 
-        console.log('Validating filters...');
-        const filtersValid = validateFilters(Filters);
-        console.log('Filters validation result:', filtersValid);
+        // Get queue list and paginate
+        const queueList = Object.values(MOCK_QUEUES);
+        const { items, nextToken: newNextToken } = paginateResults(queueList, nextToken);
 
-        if (!filtersValid) {
-            return res.status(400).json({
-                __type: 'ResourceNotFoundException',
-                message: 'One or more queues specified in the request cannot be found'
-            });
-        }
-
-        console.log('Validating metrics...');
-        const metricsValid = validateMetrics(Filters[0].Metrics);
-        console.log('Metrics validation result:', metricsValid);
-
-        if (!metricsValid) {
-            return res.status(400).json(AWS_ERRORS.VALIDATION_EXCEPTION);
-        }
-
-        const allMetricResults = [];
+        console.log('Returning queues:', items);
+        console.log('Next token:', newNextToken);
         
-        console.log('Processing filters and generating metrics...');
-        Filters.forEach(filter => {
-            const queueArns = filter.Queues || [];
-            queueArns.forEach(queueArn => {
-                const queue = Object.values(MOCK_QUEUES).find(q => q.Arn === queueArn);
-                if (queue && (!filter.Channel || filter.Channel === queue.Channel)) {
-                    const generator = new MetricGenerator(queue);
-                    const metrics = generator.generateMetrics(filter.Metrics.map(m => m.Name));
-                    allMetricResults.push(...metrics);
-                }
+        return res.json({
+            QueueSummaryList: items,
+            NextToken: newNextToken
+        });
+    } 
+    else if (action === 'GetCurrentMetricData' || req.path.includes('/current-metric-data/')) {
+        // Simulate random errors
+        const error = shouldError();
+        if (error) {
+            console.log('Random error triggered:', error);
+            return res.status(500).json(error);
+        }
+
+        try {
+            // Extract instanceId from either body or path
+            const body = req.body;
+            let instanceId;
+            if (req.path.includes('/current-metric-data/')) {
+                instanceId = req.path.split('/current-metric-data/')[1]?.split('?')[0];
+                console.log('Extracted instanceId from path:', instanceId);
+            } else {
+                instanceId = body.InstanceId;
+                console.log('Using instanceId from body:', instanceId);
+            }
+
+            // Validate instanceId
+            if (!instanceId || instanceId !== INSTANCE_ID) {
+                console.log('Invalid instanceId:', instanceId);
+                return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
+            }
+
+            // Validate filters exist and have metrics
+            const filters = body.Filters || [];
+            if (!filters.length || !filters[0]?.Metrics) {
+                console.log('Missing or invalid filters');
+                return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
+            }
+
+            // Validate filters and metrics
+            console.log('Validating filters...');
+            const filtersValid = validateFilters(filters);
+            if (!filtersValid) {
+                console.log('Filter validation failed');
+                return res.status(400).json({
+                    __type: 'ResourceNotFoundException',
+                    message: 'One or more queues specified in the request cannot be found'
+                });
+            }
+
+            console.log('Validating metrics...');
+            const metricsValid = validateMetrics(filters[0].Metrics);
+            if (!metricsValid) {
+                console.log('Metric validation failed');
+                return res.status(400).json(AWS_ERRORS.VALIDATION_EXCEPTION);
+            }
+
+            // Generate metrics for all queues
+            const allMetricResults = [];
+            filters.forEach(filter => {
+                const queueArns = filter.Queues || [];
+                queueArns.forEach(queueArn => {
+                    const queue = Object.values(MOCK_QUEUES).find(q => q.Arn === queueArn);
+                    if (queue && (!filter.Channel || filter.Channel === queue.Channel)) {
+                        const generator = new MetricGenerator(queue);
+                        const metrics = generator.generateMetrics(filter.Metrics.map(m => m.Name));
+                        console.log(`Generated metrics for queue ${queue.Name}:`, metrics);
+                        allMetricResults.push(...metrics);
+                    }
+                });
             });
-        });
 
-        const { items, nextToken: newNextToken } = paginateResults(allMetricResults, NextToken);
-        
-        const response = {
-            MetricResults: items,
-            NextToken: newNextToken,
-            DataSnapshotTime: new Date().toISOString()
-        };
+            // Paginate results if needed
+            const { items, nextToken: newNextToken } = paginateResults(allMetricResults, body.NextToken);
+            
+            const response = {
+                MetricResults: items,
+                NextToken: newNextToken,
+                DataSnapshotTime: new Date().toISOString()
+            };
 
-        console.log('Sending response:', JSON.stringify(response, null, 2));
-        return res.json(response);
+            console.log('Sending response:', JSON.stringify(response, null, 2));
+            return res.json(response);
+
+        } catch (error) {
+            console.error('Internal error:', error);
+            return res.status(500).json(AWS_ERRORS.INTERNAL_SERVICE_ERROR);
+        }
     }
-    else {
-        console.log('Unknown operation:', action);
-        return res.status(400).json({
-            __type: 'UnknownOperationException',
-            message: `Unknown operation: ${action}`
-        });
-    }
+    
+    // If not an AWS SDK request, continue to other routes
+    next();
 });
 /**
  * POST /admin/errorRate
@@ -741,6 +566,15 @@ app.options('*', (req, res) => {
     res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
     res.header('Access-Control-Allow-Headers', '*');
     res.sendStatus(200);
+});
+
+// Handle unmatched routes
+app.use((req, res) => {
+    console.log('Unmatched route:', req.path);
+    res.status(404).json({
+        __type: 'UnknownOperationException',
+        message: `Unknown operation: ${req.path}`
+    });
 });
 
 /****************************************************
