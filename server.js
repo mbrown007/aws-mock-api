@@ -159,8 +159,56 @@ const MOCK_QUEUES = {
  * We separate metrics into baseMetrics and 
  * derivedMetrics for clarity and reusability.
  ****************************************************/
+class MetricGenerator {
+  constructor(queue) {
+    this.queue = queue;
+    this.baseValues = {};
+  }
 
-// Base metric generators compute fundamental values
+  generateMetrics(metricNames) {
+    // First generate base metrics
+    for (const name of metricNames) {
+      if (MetricGenerators.baseMetrics[name]) {
+        this.baseValues[name] = MetricGenerators.baseMetrics[name](this.queue, this.baseValues);
+      }
+    }
+
+    // Then generate derived metrics
+    const results = [];
+    for (const name of metricNames) {
+      let metricValue;
+      if (MetricGenerators.baseMetrics[name]) {
+        metricValue = this.baseValues[name];
+      } else if (MetricGenerators.derivedMetrics[name]) {
+        metricValue = MetricGenerators.derivedMetrics[name](this.queue, this.baseValues);
+      }
+
+      if (metricValue) {
+        results.push({
+          Dimensions: {
+            Queue: {
+              Arn: this.queue.Arn,
+              Id: this.queue.Id,
+              Name: this.queue.Name
+            },
+            Channel: this.queue.Channel
+          },
+          Collections: [{
+            Metric: {
+              Name: name,
+              Unit: metricValue.unit
+            },
+            Value: metricValue.value
+          }]
+        });
+      }
+    }
+
+    return results;
+  }
+}
+
+// Metric generators for different metric types
 const MetricGenerators = {
   baseMetrics: {
     CONTACTS_IN_QUEUE: (queue, baseValues) => ({
@@ -232,26 +280,22 @@ const MetricGenerators = {
  * @return {boolean} true if valid, false otherwise
  */
 function validateMetrics(metrics) {
-  console.log('\nValidating metrics:', JSON.stringify(metrics, null, 2));
+    if (!Array.isArray(metrics)) {
+        console.log('Metrics is not an array');
+        return false;
+    }
+    
+    const validationResults = metrics.every(metric => {
+        console.log('Checking metric:', JSON.stringify(metric));
+        const isValid = metric && 
+            typeof metric.Name === 'string' && 
+            VALID_METRICS[metric.Name] !== undefined;
+        console.log('Metric validation result:', isValid);
+        return isValid;
+    });
   
-  // Check if metrics is an array
-  if (!Array.isArray(metrics)) {
-    console.log('Metrics is not an array');
-    return false;
-  }
-  
-  // Every metric must have a valid name
-  const validationResults = metrics.every(metric => {
-    console.log('Checking metric:', JSON.stringify(metric));
-    const isValid = metric && 
-      typeof metric.Name === 'string' && 
-      VALID_METRICS[metric.Name] !== undefined;
-    console.log('Metric validation result:', isValid);
-    return isValid;
-  });
-  
-  console.log('Valid metrics:', validationResults);
-  return validationResults;
+    console.log('Valid metrics:', validationResults);
+    return validationResults;
 }
 
 /**
@@ -263,66 +307,63 @@ function validateMetrics(metrics) {
  * @return {boolean} true if valid, false otherwise
  */
 function validateFilters(filters) {
-  if (!Array.isArray(filters)) {
-    console.log('Filters is not an array');
-    return false;
-  }
-  
-  // Check each filter one by one
-  return filters.every(filter => {
-    console.log('\nValidating filter:', JSON.stringify(filter, null, 2));
-    
-    // 1. Queues must be present and non-empty
-    if (!filter.Queues || !Array.isArray(filter.Queues) || filter.Queues.length === 0) {
-      console.log('Invalid or empty Queues array');
-      return false;
+    console.log('\n=== Starting Filter Validation ===');
+    console.log('Validating filters:', JSON.stringify(filters, null, 2));
+
+    // 1. Basic structure validation
+    if (!filters || typeof filters !== 'object') {
+        console.log('❌ Invalid filters object - not an object:', typeof filters);
+        return false;
     }
-    
-    // 2. Each queue ARN in the filter must match an ARN from MOCK_QUEUES
-    console.log('\nAvailable queue ARNs:', JSON.stringify(Object.values(MOCK_QUEUES).map(q => q.Arn), null, 2));
-    const validQueues = filter.Queues.every(queueArn => {
-      const found = Object.values(MOCK_QUEUES).some(q => {
-        const arnsMatch = q.Arn === queueArn;
-        console.log('\nARN Comparison (Character by character):');
-        console.log('Request ARN :', queueArn);
-        console.log('Queue ARN  :', q.Arn);
-        console.log('Lengths   :', queueArn.length, q.Arn.length);
-        console.log('Match     :', arnsMatch);
-        
-        // If they don't match, log the first difference for debug purposes
-        if (!arnsMatch) {
-          for (let i = 0; i < Math.max(queueArn.length, q.Arn.length); i++) {
-            if (queueArn[i] !== q.Arn[i]) {
-              console.log(`First difference at position ${i}:`);
-              console.log(`Request: "${queueArn[i]}" (${queueArn.charCodeAt(i)})`);
-              console.log(`Queue  : "${q.Arn[i]}" (${q.Arn.charCodeAt(i)})`);
-              break;
-            }
-          }
-        }
-        return arnsMatch;
-      });
-      
-      if (!found) {
-        console.log('Queue not found for ARN:', queueArn);
-      }
-      return found;
+
+    // 2. Validate Queues array
+    if (!Array.isArray(filters.Queues) || filters.Queues.length === 0) {
+        console.log('❌ Invalid or empty Queues array:', filters.Queues);
+        return false;
+    }
+
+    console.log('\n📋 Available Queues:');
+    Object.values(MOCK_QUEUES).forEach(q => {
+        console.log(`  - ID: ${q.Id}, Name: ${q.Name}`);
     });
+
+    // 3. Validate each Queue ID
+    const validQueues = filters.Queues.every(queueId => {
+        console.log(`\n🔍 Validating Queue ID: ${queueId}`);
+        
+        const queue = Object.values(MOCK_QUEUES).find(q => q.Id === queueId);
+        const found = !!queue;
+
+        if (found) {
+            console.log('✅ Found matching queue:', {
+                Id: queue.Id,
+                Name: queue.Name,
+                Type: queue.QueueType,
+                Channel: queue.Channel
+            });
+        } else {
+            console.log('❌ No matching queue found for ID:', queueId);
+            console.log('Available Queue IDs:', Object.values(MOCK_QUEUES).map(q => q.Id));
+        }
+
+        return found;
+    });
+
+    // 4. Channel validation (if specified)
+    if (filters.Channel) {
+        console.log('\n📡 Validating Channel:', filters.Channel);
+        if (!VALID_CHANNELS.includes(filters.Channel)) {
+            console.log('❌ Invalid channel. Valid channels are:', VALID_CHANNELS);
+            return false;
+        }
+        console.log('✅ Channel validation passed');
+    }
+
+    // 5. Final result
+    console.log('\n=== Filter Validation Result ===');
+    console.log(validQueues ? '✅ All validations passed' : '❌ Validation failed');
     
-    if (!validQueues) {
-      console.log('Queue validation failed');
-      return false;
-    }
-
-    // 3. Check channel if specified, must be in VALID_CHANNELS
-    if (filter.Channel && !VALID_CHANNELS.includes(filter.Channel)) {
-      console.log('Channel validation failed:', filter.Channel);
-      return false;
-    }
-
-    console.log('Filter validation passed');
-    return true;
-  });
+    return validQueues;
 }
 
 /****************************************************
@@ -393,7 +434,9 @@ function paginateResults(items, nextToken) {
     };
 }
 
-// Update the main route handler for AWS SDK compatibility
+/****************************************************
+ * MAIN ROUTE HANDLER
+ ****************************************************/
 app.all('*', (req, res, next) => {
     console.log('\n=== Incoming Request ===');
     console.log('Method:', req.method);
@@ -454,86 +497,97 @@ app.all('*', (req, res, next) => {
             NextToken: newNextToken
         });
     } 
-    else if (action === 'GetCurrentMetricData' || req.path.includes('/current-metric-data/')) {
-        // Simulate random errors
-        const error = shouldError();
-        if (error) {
-            console.log('Random error triggered:', error);
-            return res.status(500).json(error);
+    else if (action === 'GetCurrentMetricData' || req.path.includes('/metrics/current/')) {
+        console.log('\n=== Processing Metrics Request ===');
+        
+        // 1. Extract and validate instanceId
+        let instanceId;
+        if (req.path.includes('/metrics/current/')) {
+            instanceId = req.path.split('/metrics/current/')[1]?.split('?')[0];
+            console.log('📍 Extracted instanceId from path:', instanceId);
+        } else {
+            instanceId = req.body.InstanceId;
+            console.log('📍 Using instanceId from body:', instanceId);
+        }
+
+        if (!instanceId || instanceId !== INSTANCE_ID) {
+            console.log('❌ Invalid instanceId:', instanceId);
+            console.log('Expected:', INSTANCE_ID);
+            return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
         }
 
         try {
-            // Extract instanceId from either body or path
             const body = req.body;
-            let instanceId;
-            if (req.path.includes('/current-metric-data/')) {
-                instanceId = req.path.split('/current-metric-data/')[1]?.split('?')[0];
-                console.log('Extracted instanceId from path:', instanceId);
-            } else {
-                instanceId = body.InstanceId;
-                console.log('Using instanceId from body:', instanceId);
-            }
-
-            // Validate instanceId
-            if (!instanceId || instanceId !== INSTANCE_ID) {
-                console.log('Invalid instanceId:', instanceId);
-                return res.status(404).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
-            }
-
-            // Validate filters exist and have metrics
-            const filters = body.Filters || [];
-            if (!filters.length || !filters[0]?.Metrics) {
-                console.log('Missing or invalid filters');
+            console.log('\n📦 Request body:', JSON.stringify(body, null, 2));
+            
+            // 2. Validate request structure
+            if (!body.Filters || !body.CurrentMetrics) {
+                console.log('❌ Missing required fields. Filters or CurrentMetrics not found');
                 return res.status(400).json(AWS_ERRORS.INVALID_PARAMETER);
             }
 
-            // Validate filters and metrics
-            console.log('Validating filters...');
-            const filtersValid = validateFilters(filters);
-            if (!filtersValid) {
-                console.log('Filter validation failed');
-                return res.status(400).json({
-                    __type: 'ResourceNotFoundException',
-                    message: 'One or more queues specified in the request cannot be found'
-                });
-            }
-
-            console.log('Validating metrics...');
-            const metricsValid = validateMetrics(filters[0].Metrics);
+            // 3. Validate metrics
+            console.log('\n🔍 Validating metrics...');
+            const metricsValid = validateMetrics(body.CurrentMetrics);
             if (!metricsValid) {
-                console.log('Metric validation failed');
+                console.log('❌ Metric validation failed');
                 return res.status(400).json(AWS_ERRORS.VALIDATION_EXCEPTION);
             }
+            console.log('✅ Metrics validation passed');
 
-            // Generate metrics for all queues
+            // 4. Validate filters
+            console.log('\n🔍 Validating filters...');
+            const filtersValid = validateFilters(body.Filters);
+            if (!filtersValid) {
+                console.log('❌ Filter validation failed');
+                return res.status(400).json(AWS_ERRORS.RESOURCE_NOT_FOUND);
+            }
+            console.log('✅ Filters validation passed');
+
+            // 5. Check for random errors
+            const error = shouldError();
+            if (error) {
+                console.log('⚠️ Random error triggered:', error);
+                return res.status(500).json(error);
+            }
+
+            // 6. Generate metrics
+            console.log('\n📊 Generating metrics...');
             const allMetricResults = [];
-            filters.forEach(filter => {
-                const queueArns = filter.Queues || [];
-                queueArns.forEach(queueArn => {
-                    const queue = Object.values(MOCK_QUEUES).find(q => q.Arn === queueArn);
-                    if (queue && (!filter.Channel || filter.Channel === queue.Channel)) {
-                        const generator = new MetricGenerator(queue);
-                        const metrics = generator.generateMetrics(filter.Metrics.map(m => m.Name));
-                        console.log(`Generated metrics for queue ${queue.Name}:`, metrics);
-                        allMetricResults.push(...metrics);
-                    }
-                });
+            const queueIds = body.Filters.Queues;
+            
+            queueIds.forEach(queueId => {
+                const queue = Object.values(MOCK_QUEUES).find(q => q.Id === queueId);
+                if (queue) {
+                    console.log(`Generating metrics for queue: ${queue.Name} (${queue.Id})`);
+                    const generator = new MetricGenerator(queue);
+                    const metrics = generator.generateMetrics(
+                        body.CurrentMetrics.map(m => m.Name)
+                    );
+                    console.log('Generated metrics:', JSON.stringify(metrics, null, 2));
+                    allMetricResults.push(...metrics);
+                }
             });
 
-            // Paginate results if needed
-            const { items, nextToken: newNextToken } = paginateResults(allMetricResults, body.NextToken);
-            
+            // 7. Paginate results
+            console.log('\n📑 Paginating results...');
+            const { items, nextToken: newNextToken } = paginateResults(
+                allMetricResults, 
+                body.NextToken
+            );
+
+            // 8. Send response
             const response = {
                 MetricResults: items,
                 NextToken: newNextToken,
-                DataSnapshotTime: new Date().toISOString()
+                DataSnapshotTime: Date.now()
             };
 
-            console.log('Sending response:', JSON.stringify(response, null, 2));
+            console.log('\n✅ Sending response:', JSON.stringify(response, null, 2));
             return res.json(response);
 
         } catch (error) {
-            console.error('Internal error:', error);
+            console.error('\n❌ Internal error:', error);
             return res.status(500).json(AWS_ERRORS.INTERNAL_SERVICE_ERROR);
         }
     }
